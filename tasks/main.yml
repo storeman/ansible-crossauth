@@ -1,0 +1,39 @@
+---
+
+- name: Create the SSH directory.
+  file: state=directory path={{home_path}}/.ssh/
+  sudo_user: "{{ crossauth_user }}"
+
+- name: Generate ssh key
+  command: ssh-keygen -b 4096 -N '' -f {{home_path}}/.ssh/id_rsa creates={{home_path}}/.ssh/id_rsa
+  sudo_user: "{{ crossauth_user }}"
+
+# will show misconfigured host but not stop for them
+- name: Add short name to file
+  local_action: shell ssh-keyscan -H {{inventory_hostname}} 2> /dev/null >> {{ssh_known_hosts_keyfile}}
+  ignore_errors: True
+
+- name: Add FQDN to file
+  local_action: shell ssh-keyscan -H {{ansible_fqdn}} 2> /dev/null >> {{ssh_known_hosts_keyfile}}
+  ignore_errors: True
+
+- name: Add IPv4 to file
+  local_action: shell ssh-keyscan -H {{item}} 2> /dev/null >> {{ssh_known_hosts_keyfile}}
+  ignore_errors: True
+  with_items: "{{ansible_all_ipv4_addresses}}"
+
+- name: copy into place
+  copy: src={{ssh_known_hosts_keyfile}} dest=/etc/ssh/ssh_known_hosts
+
+- name: Get the public key off the machine
+  slurp: src="{{home_path}}/.ssh/id_rsa.pub"
+  register: sshkey
+
+- name: Remove known_hosts file
+  local_action: file dest={{ssh_known_hosts_keyfile}} state=absent
+
+- name: Install public key on remote hosts
+  authorized_key: user={{ crossauth_user }} key="{{ sshkey.content|b64decode }}"
+  delegate_to: "{{ item }}"
+  with_items: play_hosts
+  ignore_errors: True
